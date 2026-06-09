@@ -55,6 +55,8 @@
   button { cursor: pointer; width: auto; background: var(--surface2); transition: background 0.12s; }
   button:hover { background: #262b35; }
   button:active { transform: scale(0.98); }
+  button:disabled, input:disabled { opacity: 0.45; cursor: not-allowed; }
+  button:disabled:hover { background: var(--surface2); }
   button.primary { background: var(--info); border-color: var(--info); color: #fff; }
   button.primary:hover { background: #2f78c4; }
   button.approve { background: var(--green-bg); border-color: var(--green); color: var(--green); }
@@ -70,6 +72,8 @@
   .err { color: var(--danger); font-size: 13px; min-height: 18px; margin-top: 6px; }
   .ok { color: var(--green); font-size: 13px; min-height: 18px; margin-top: 6px; }
   .note { font-size: 12px; color: var(--hint); margin-top: 8px; }
+  .countdown { color: var(--amber); font-variant-numeric: tabular-nums; }
+  #deadline-note { margin: 0 0 12px; font-size: 13px; color: var(--muted); }
   .admin-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .hidden { display: none !important; }
   .actions { display: flex; gap: 6px; }
@@ -131,7 +135,8 @@
 
   <!-- Submit a bet (everyone) -->
   <div class="card">
-    <h2><i></i>Submit a bet</h2>
+    <h2>Submit a bet</h2>
+    <div class="note" id="deadline-note"></div>
     <div class="toggle">
       <button id="t-winner" class="active" onclick="setCat('winner')">Team to win</button>
       <button id="t-scorer" onclick="setCat('scorer')">Top scorer</button>
@@ -140,7 +145,7 @@
       <div class="field"><label>Your name</label><input type="text" id="i-member" placeholder="Name" /></div>
       <div class="field"><label id="lbl-pick">Team pick</label><input type="text" id="i-pick" placeholder="Brazil" /></div>
       <div class="field" style="max-width:110px;"><label>Bet ($)</label><input type="number" id="i-amt" placeholder="20" min="0" step="any" /></div>
-      <button class="primary" onclick="submitBet()">Submit</button>
+      <button class="primary" id="submit-btn" onclick="submitBet()">Submit</button>
     </div>
     <div class="err" id="submit-err"></div>
     <div class="ok" id="submit-ok"></div>
@@ -235,6 +240,7 @@
 
       <h3>6 · Conventions</h3>
       <ul>
+        <li><b>Deadline.</b> Submissions close at the end of <b>16 June 2026</b>. After the deadline both markets are locked and no further entries are accepted.</li>
         <li><b>Two markets, two pots.</b> Team-to-win and Top-scorer are settled independently, each with its own pot \(P\). Rules 1–5 apply within a single market.</li>
         <li><b>Free entry.</b> Each member may back any pick for any positive stake. Distinct members may back the same pick; if it wins, they share that pot by stake (rule 3).</li>
         <li><b>Void market.</b> If no entry in a market is correct, that market is void and all of its stakes are refunded (rule 3, final clause). The other market is unaffected.</li>
@@ -254,6 +260,9 @@
 
   // Admin password (visible in page source — keep it throwaway).
   const ADMIN_PASSWORD = "hotpottoppotmbappe";
+
+  // Submissions close at the end of this day (local time). Year, month (0-based), day, h, m, s.
+  const SUBMIT_DEADLINE = new Date(2026, 5, 16, 23, 59, 59);
   // ====================================================================
 
   let cat = "winner";
@@ -269,6 +278,30 @@
     sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     loadAll();
   }
+
+  function submissionsClosed() { return new Date() > SUBMIT_DEADLINE; }
+
+  let deadlineTimer = null;
+  function refreshDeadline() {
+    const note = document.getElementById("deadline-note");
+    const btn = document.getElementById("submit-btn");
+    const dateStr = SUBMIT_DEADLINE.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+    const ms = SUBMIT_DEADLINE - new Date();
+    if (ms <= 0) {
+      note.innerHTML = "<b>Submissions are closed</b> (deadline was end of " + dateStr + "). The board is final.";
+      btn.disabled = true;
+      ["i-member", "i-pick", "i-amt"].forEach(id => document.getElementById(id).disabled = true);
+      if (deadlineTimer) { clearInterval(deadlineTimer); deadlineTimer = null; }
+      return;
+    }
+    const t = Math.floor(ms / 1000);
+    const d = Math.floor(t / 86400), h = Math.floor((t % 86400) / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
+    const cd = (d ? d + "d " : "") + h + "h " + m + "m " + s + "s";
+    note.innerHTML = 'Submissions close in <b class="countdown">' + cd + "</b> — end of " + dateStr + ".";
+    btn.disabled = false;
+  }
+  refreshDeadline();
+  deadlineTimer = setInterval(refreshDeadline, 1000);
 
   function showTab(name) {
     document.getElementById("tab-pool").classList.toggle("hidden", name !== "pool");
@@ -320,6 +353,7 @@
     const ok = document.getElementById("submit-ok");
     err.textContent = ""; ok.textContent = "";
     if (!configured) { err.textContent = "Site not configured yet."; return; }
+    if (submissionsClosed()) { refreshDeadline(); err.textContent = "Submissions are closed."; return; }
     if (!member || !pick || isNaN(amt) || amt < 0) {
       err.textContent = "Enter your name, a pick, and a valid bet amount.";
       return;
