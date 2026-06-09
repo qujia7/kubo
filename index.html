@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>KUBO — KIPAC Underground Betting Organization</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root {
+    --bg: #0f1115; --surface: #181b22; --surface2: #1f232c;
+    --border: #2a2f3a; --text: #e6e8ec; --muted: #9aa1ad; --hint: #6b7280;
+    --info: #378ADD; --info-bg: rgba(55,138,221,0.15);
+    --amber: #EF9F27; --amber-bg: rgba(239,159,39,0.15);
+    --green: #639922; --green-bg: rgba(99,153,34,0.15);
+    --danger: #E24B4A; --danger-bg: rgba(226,75,74,0.15);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    line-height: 1.6; padding: 1.5rem 1rem 4rem;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; }
+  .head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+  .title { font-size: 26px; font-weight: 600; letter-spacing: 1px; }
+  .sub { font-size: 13px; color: var(--muted); }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 1.25rem 0; }
+  .stat { background: var(--surface2); border-radius: 10px; padding: 0.8rem 1rem; }
+  .stat .lbl { font-size: 12px; color: var(--muted); }
+  .stat .val { font-size: 22px; font-weight: 600; margin-top: 2px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1.1rem 1.25rem; margin: 1rem 0; }
+  .card h2 { font-size: 16px; font-weight: 600; margin: 0 0 0.75rem; display: flex; align-items: center; gap: 8px; }
+  .toggle { display: flex; gap: 6px; margin-bottom: 12px; }
+  .toggle button { flex: 1; }
+  .toggle button.active { background: var(--info-bg); border-color: var(--info); color: var(--info); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; }
+  .field { flex: 1; min-width: 110px; }
+  .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  input, button, select {
+    font: inherit; color: var(--text); background: var(--surface2);
+    border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; height: 38px; width: 100%;
+  }
+  input:focus { outline: none; border-color: var(--info); }
+  button { cursor: pointer; width: auto; background: var(--surface2); transition: background 0.12s; }
+  button:hover { background: #262b35; }
+  button:active { transform: scale(0.98); }
+  button.primary { background: var(--info); border-color: var(--info); color: #fff; }
+  button.primary:hover { background: #2f78c4; }
+  button.approve { background: var(--green-bg); border-color: var(--green); color: var(--green); }
+  button.reject, button.del { background: var(--danger-bg); border-color: var(--danger); color: var(--danger); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; table-layout: fixed; }
+  th { text-align: left; font-weight: 500; font-size: 12px; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  td { padding: 9px 8px; border-bottom: 1px solid var(--border); word-break: break-word; vertical-align: middle; }
+  .pill { display: inline-block; font-size: 11px; padding: 3px 9px; border-radius: 7px; white-space: nowrap; }
+  .pill.win { background: var(--info-bg); color: var(--info); }
+  .pill.score { background: var(--amber-bg); color: var(--amber); }
+  .badge { background: var(--amber); color: #1a1207; font-size: 12px; font-weight: 600; border-radius: 20px; padding: 1px 9px; margin-left: 4px; }
+  .empty { text-align: center; color: var(--hint); font-size: 14px; padding: 1.25rem 0; }
+  .err { color: var(--danger); font-size: 13px; min-height: 18px; margin-top: 6px; }
+  .ok { color: var(--green); font-size: 13px; min-height: 18px; margin-top: 6px; }
+  .note { font-size: 12px; color: var(--hint); margin-top: 8px; }
+  .admin-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .conflict { color: var(--danger); font-size: 11px; }
+  .hidden { display: none !important; }
+  .actions { display: flex; gap: 6px; }
+  .actions button { height: 30px; padding: 0 10px; font-size: 13px; }
+  .banner { background: var(--danger-bg); border: 1px solid var(--danger); color: var(--danger); border-radius: 10px; padding: 0.8rem 1rem; font-size: 13px; margin: 1rem 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="head">
+    <span class="title">KUBO</span>
+    <span class="sub">KIPAC Underground Betting Organization · World Cup pool</span>
+  </div>
+
+  <div id="config-banner" class="banner hidden">
+    Supabase is not configured yet. Open this file and fill in <code>SUPABASE_URL</code> and <code>SUPABASE_ANON_KEY</code> near the top of the script.
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="lbl">Approved bets</div><div class="val" id="s-count">—</div></div>
+    <div class="stat"><div class="lbl">Pot total</div><div class="val" id="s-pot">—</div></div>
+    <div class="stat"><div class="lbl">Members</div><div class="val" id="s-mem">—</div></div>
+  </div>
+
+  <!-- Submit a bet (everyone) -->
+  <div class="card">
+    <h2><i></i>Submit a bet</h2>
+    <div class="toggle">
+      <button id="t-winner" class="active" onclick="setCat('winner')">Team to win</button>
+      <button id="t-scorer" onclick="setCat('scorer')">Top scorer</button>
+    </div>
+    <div class="row">
+      <div class="field"><label>Your name</label><input type="text" id="i-member" placeholder="Name" /></div>
+      <div class="field"><label id="lbl-pick">Team pick</label><input type="text" id="i-pick" placeholder="Brazil" /></div>
+      <div class="field" style="max-width:110px;"><label>Bet ($)</label><input type="number" id="i-amt" placeholder="20" min="0" step="any" /></div>
+      <button class="primary" onclick="submitBet()">Submit</button>
+    </div>
+    <div class="err" id="submit-err"></div>
+    <div class="ok" id="submit-ok"></div>
+    <div class="note">Submissions go to the admin for approval before appearing on the board. No duplicate picks allowed within a category.</div>
+  </div>
+
+  <!-- Admin login / pending queue -->
+  <div class="card">
+    <h2>Admin <span id="pending-badge" class="badge hidden">0</span></h2>
+    <div id="admin-login" class="admin-bar">
+      <input type="password" id="i-pass" placeholder="Admin password" style="max-width:220px;" />
+      <button onclick="login()">Unlock</button>
+      <span class="err" id="login-err" style="margin:0;"></span>
+    </div>
+    <div id="admin-panel" class="hidden">
+      <div class="admin-bar" style="margin-bottom:0.75rem;">
+        <span class="sub">Admin mode active.</span>
+        <button onclick="logout()">Lock</button>
+      </div>
+      <table>
+        <colgroup><col style="width:24%"><col style="width:26%"><col style="width:16%"><col style="width:13%"><col style="width:21%"></colgroup>
+        <thead><tr><th>Member</th><th>Pick</th><th>Category</th><th>Bet</th><th></th></tr></thead>
+        <tbody id="pending-body"></tbody>
+      </table>
+      <div class="empty" id="pending-empty">No pending submissions.</div>
+    </div>
+  </div>
+
+  <!-- Approved board (everyone) -->
+  <div class="card">
+    <h2>The board</h2>
+    <table>
+      <colgroup><col style="width:28%"><col style="width:30%"><col style="width:18%"><col style="width:14%"><col style="width:10%"></colgroup>
+      <thead><tr><th>Member</th><th>Pick</th><th>Category</th><th>Bet</th><th></th></tr></thead>
+      <tbody id="board-body"></tbody>
+    </table>
+    <div class="empty" id="board-empty">No approved bets yet.</div>
+  </div>
+
+</div>
+
+<script>
+  // ====================================================================
+  //  STEP 1 — paste your two Supabase values between the quotes below.
+  //  Find them in Supabase: Project Settings -> API.
+  // ====================================================================
+  const SUPABASE_URL = "https://qbnehadwdxawxkggcwrf.supabase.co";
+  const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFibmVoYWR3ZHhhd3hrZ2djd3JmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwMjYyODgsImV4cCI6MjA5NjYwMjI4OH0.ZwGkJaIWFKmgPWEmA3_9CGmqazUM1KuNAURFYM3vFIM";
+
+  // Admin password (visible in page source — keep it throwaway).
+  const ADMIN_PASSWORD = "hotpottoppotmbappe";
+  // ====================================================================
+
+  let cat = "winner";
+  let isAdmin = false;
+  let board = [];
+  let pending = [];
+  let sb = null;
+
+  const configured = SUPABASE_URL.startsWith("http") && SUPABASE_ANON_KEY.length > 20;
+  if (!configured) {
+    document.getElementById("config-banner").classList.remove("hidden");
+  } else {
+    sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    loadAll();
+  }
+
+  function setCat(c) {
+    cat = c;
+    document.getElementById("t-winner").classList.toggle("active", c === "winner");
+    document.getElementById("t-scorer").classList.toggle("active", c === "scorer");
+    document.getElementById("lbl-pick").textContent = c === "winner" ? "Team pick" : "Player pick";
+    document.getElementById("i-pick").placeholder = c === "winner" ? "Brazil" : "Mbappe";
+  }
+
+  function fmt(n) { return "$" + Math.round(n || 0).toLocaleString(); }
+  function esc(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+  function catPill(c) {
+    return c === "winner"
+      ? '<span class="pill win">Winner</span>'
+      : '<span class="pill score">Top scorer</span>';
+  }
+
+  async function loadAll() {
+    await Promise.all([loadBoard(), loadPending()]);
+  }
+
+  async function loadBoard() {
+    const { data, error } = await sb.from("bets").select("*").order("member");
+    if (error) { console.error(error); return; }
+    board = data || [];
+    renderBoard();
+  }
+
+  async function loadPending() {
+    const { data, error } = await sb.from("pending").select("*").order("created_at");
+    if (error) { console.error(error); return; }
+    pending = data || [];
+    renderPending();
+  }
+
+  async function submitBet() {
+    const member = document.getElementById("i-member").value.trim();
+    const pick = document.getElementById("i-pick").value.trim();
+    const amt = parseFloat(document.getElementById("i-amt").value);
+    const err = document.getElementById("submit-err");
+    const ok = document.getElementById("submit-ok");
+    err.textContent = ""; ok.textContent = "";
+    if (!configured) { err.textContent = "Site not configured yet."; return; }
+    if (!member || !pick || isNaN(amt) || amt < 0) {
+      err.textContent = "Enter your name, a pick, and a valid bet amount.";
+      return;
+    }
+    const taken = board.some(b => b.cat === cat && b.pick.toLowerCase() === pick.toLowerCase());
+    if (taken) { err.textContent = '"' + pick + '" is already on the board in this category.'; return; }
+    const { error } = await sb.from("pending").insert({ member, pick, cat, amt });
+    if (error) { err.textContent = "Could not submit. Try again."; console.error(error); return; }
+    document.getElementById("i-member").value = "";
+    document.getElementById("i-pick").value = "";
+    document.getElementById("i-amt").value = "";
+    ok.textContent = "Submitted — waiting for admin approval.";
+    await loadPending();
+  }
+
+  function login() {
+    const val = document.getElementById("i-pass").value;
+    const err = document.getElementById("login-err");
+    if (val === ADMIN_PASSWORD) {
+      isAdmin = true;
+      document.getElementById("admin-login").classList.add("hidden");
+      document.getElementById("admin-panel").classList.remove("hidden");
+      err.textContent = "";
+      renderBoard();
+      renderPending();
+    } else {
+      err.textContent = "Wrong password.";
+    }
+  }
+
+  function logout() {
+    isAdmin = false;
+    document.getElementById("admin-login").classList.remove("hidden");
+    document.getElementById("admin-panel").classList.add("hidden");
+    document.getElementById("i-pass").value = "";
+    renderBoard();
+  }
+
+  async function approve(id) {
+    const item = pending.find(p => p.id === id);
+    if (!item) return;
+    const taken = board.some(b => b.cat === item.cat && b.pick.toLowerCase() === item.pick.toLowerCase());
+    if (taken) { alert('"' + item.pick + '" is already on the board in this category. Reject this one or remove the existing entry first.'); return; }
+    const ins = await sb.from("bets").insert({ member: item.member, pick: item.pick, cat: item.cat, amt: item.amt });
+    if (ins.error) { console.error(ins.error); return; }
+    await sb.from("pending").delete().eq("id", id);
+    await loadAll();
+  }
+
+  async function reject(id) {
+    await sb.from("pending").delete().eq("id", id);
+    await loadPending();
+  }
+
+  async function delBet(id) {
+    if (!confirm("Remove this bet from the board?")) return;
+    await sb.from("bets").delete().eq("id", id);
+    await loadBoard();
+  }
+
+  function renderBoard() {
+    const tb = document.getElementById("board-body");
+    const empty = document.getElementById("board-empty");
+    tb.innerHTML = "";
+    const sorted = [...board].sort((a, b) => a.cat === b.cat ? a.member.localeCompare(b.member) : (a.cat === "winner" ? -1 : 1));
+    empty.style.display = sorted.length ? "none" : "block";
+    for (const b of sorted) {
+      const tr = document.createElement("tr");
+      const action = isAdmin ? '<div class="actions"><button class="del" onclick="delBet(\'' + b.id + '\')">Remove</button></div>' : "";
+      tr.innerHTML = "<td>" + esc(b.member) + "</td><td>" + esc(b.pick) + "</td><td>" + catPill(b.cat) + "</td><td>" + fmt(b.amt) + "</td><td>" + action + "</td>";
+      tb.appendChild(tr);
+    }
+    document.getElementById("s-count").textContent = board.length;
+    document.getElementById("s-pot").textContent = fmt(board.reduce((s, b) => s + (b.amt || 0), 0));
+    document.getElementById("s-mem").textContent = new Set(board.map(b => b.member.toLowerCase())).size;
+  }
+
+  function renderPending() {
+    const badge = document.getElementById("pending-badge");
+    badge.textContent = pending.length;
+    badge.classList.toggle("hidden", pending.length === 0);
+    if (!isAdmin) return;
+    const tb = document.getElementById("pending-body");
+    const empty = document.getElementById("pending-empty");
+    tb.innerHTML = "";
+    empty.style.display = pending.length ? "none" : "block";
+    for (const p of pending) {
+      const conflict = board.some(b => b.cat === p.cat && b.pick.toLowerCase() === p.pick.toLowerCase());
+      const pickCell = esc(p.pick) + (conflict ? '<div class="conflict">already taken</div>' : "");
+      const tr = document.createElement("tr");
+      tr.innerHTML = "<td>" + esc(p.member) + "</td><td>" + pickCell + "</td><td>" + catPill(p.cat) + "</td><td>" + fmt(p.amt) +
+        '</td><td><div class="actions"><button class="approve" onclick="approve(\'' + p.id + '\')">Approve</button>' +
+        '<button class="reject" onclick="reject(\'' + p.id + '\')">Reject</button></div></td>';
+      tb.appendChild(tr);
+    }
+  }
+</script>
+</body>
+</html>
