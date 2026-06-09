@@ -148,7 +148,7 @@
     <div class="row">
       <div class="field"><label>Your name</label><input type="text" id="i-member" placeholder="Name" /></div>
       <div class="field"><label id="lbl-pick">Team pick</label><input type="text" id="i-pick" placeholder="Brazil" /></div>
-      <div class="field" style="max-width:110px;"><label>Bet ($)</label><input type="number" id="i-amt" placeholder="20" min="0" step="any" /></div>
+      <div class="field" style="max-width:130px;"><label>Bet ($, min 10)</label><input type="number" id="i-amt" placeholder="20" min="10" step="any" /></div>
       <button class="primary" id="submit-btn" onclick="submitBet()">Submit</button>
     </div>
     <div class="err" id="submit-err"></div>
@@ -213,7 +213,7 @@
       <h3>1 · Entries</h3>
       <p>Within a market, the entries are a finite list
       \[ e_i = (m_i,\; p_i,\; b_i), \qquad i = 1,\dots,n, \]
-      where \(m_i\) is the member, \(p_i\) the pick (a team, or a player), and \(b_i \in \mathbb{R}_{>0}\) the stake in dollars. Stakes are unrestricted: any positive amount is admissible, and the same pick may be backed by several members.</p>
+      where \(m_i\) is the member, \(p_i\) the pick (a team, or a player), and \(b_i \geq \$10\) the stake in dollars. Any amount at or above the \(\$10\) minimum is admissible, and the same pick may be backed by several members.</p>
 
       <h3>2 · The pot</h3>
       <p>All stakes in the market are pooled with no rake taken by the house:
@@ -268,6 +268,9 @@
 
   // Submissions close at the end of this day (local time). Year, month (0-based), day, h, m, s.
   const SUBMIT_DEADLINE = new Date(2026, 5, 16, 23, 59, 59);
+
+  // Minimum stake, in dollars.
+  const MIN_BET = 10;
   // ====================================================================
 
   let cat = "winner";
@@ -370,8 +373,12 @@
     err.textContent = ""; ok.textContent = "";
     if (!configured) { err.textContent = "Site not configured yet."; return; }
     if (submissionsClosed()) { refreshDeadline(); err.textContent = "Submissions are closed."; return; }
-    if (!member || !pick || isNaN(amt) || amt < 0) {
-      err.textContent = "Enter your name, a pick, and a valid bet amount.";
+    if (!member || !pick || isNaN(amt)) {
+      err.textContent = "Enter your name, a pick, and a bet amount.";
+      return;
+    }
+    if (amt < MIN_BET) {
+      err.textContent = "Minimum bet is $" + MIN_BET + ".";
       return;
     }
     const { error } = await sb.from("pending").insert({ member, pick, cat, amt });
