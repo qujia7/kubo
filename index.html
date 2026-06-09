@@ -21,13 +21,17 @@
     line-height: 1.6; padding: 1.5rem 1rem 4rem;
   }
   .wrap { max-width: 720px; margin: 0 auto; }
-  .head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
-  .title { font-size: 26px; font-weight: 600; letter-spacing: 1px; }
+  .head { display: flex; align-items: center; gap: 14px; margin-bottom: 4px; }
+  .logo { flex: none; width: 46px; height: 46px; border-radius: 12px; display: grid; place-items: center;
+    font-size: 24px; overflow: hidden; background: linear-gradient(145deg, var(--info), #2f78c4); box-shadow: 0 2px 10px rgba(55,138,221,0.35); }
+  .logo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .head .title { font-size: 26px; font-weight: 700; letter-spacing: 1px; line-height: 1.1; }
   .sub { font-size: 13px; color: var(--muted); }
   .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 1.25rem 0; }
-  .stat { background: var(--surface2); border-radius: 10px; padding: 0.8rem 1rem; }
-  .stat .lbl { font-size: 12px; color: var(--muted); }
-  .stat .val { font-size: 22px; font-weight: 600; margin-top: 2px; }
+  .stat { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 0.8rem 1rem; }
+  .stat .lbl { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .stat .val { font-size: 22px; font-weight: 700; margin-top: 2px; }
+  .stat .split { font-size: 11px; color: var(--hint); margin-top: 4px; }
   .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1.1rem 1.25rem; margin: 1rem 0; }
   .card h2 { font-size: 16px; font-weight: 600; margin: 0 0 0.75rem; display: flex; align-items: center; gap: 8px; }
   .toggle { display: flex; gap: 6px; margin-bottom: 12px; }
@@ -65,14 +69,30 @@
   .actions { display: flex; gap: 6px; }
   .actions button { height: 30px; padding: 0 10px; font-size: 13px; }
   .banner { background: var(--danger-bg); border: 1px solid var(--danger); color: var(--danger); border-radius: 10px; padding: 0.8rem 1rem; font-size: 13px; margin: 1rem 0; }
+  .card-head { display: flex; align-items: center; gap: 8px; margin: 0 0 0.75rem; }
+  .card-head h2 { margin: 0; flex: 1; }
+  .card-head .ghost { height: 30px; padding: 0 10px; font-size: 13px; }
+  .filter { margin-bottom: 12px; }
+  .board-section { margin-bottom: 14px; }
+  .board-section:last-child { margin-bottom: 0; }
+  .section-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .section-sub { font-size: 12px; color: var(--hint); }
+  .lb-name { position: relative; }
+  .lb-bar { position: absolute; left: -8px; top: 0; bottom: 0; background: var(--info-bg); border-radius: 4px; z-index: 0; }
+  .lb-name span { position: relative; z-index: 1; }
+  .rank { color: var(--hint); font-variant-numeric: tabular-nums; }
+  .rank.top { color: var(--amber); font-weight: 700; }
 </style>
 </head>
 <body>
 <div class="wrap">
 
   <div class="head">
-    <span class="title">KUBO</span>
-    <span class="sub">KIPAC Underground Betting Organization · World Cup pool</span>
+    <div class="logo"><img src="logo.avif" alt="KUBO" onerror="this.parentNode.textContent='⚽'" /></div>
+    <div>
+      <div class="title">KUBO</div>
+      <div class="sub">KIPAC Underground Betting Organization · World Cup pool</div>
+    </div>
   </div>
 
   <div id="config-banner" class="banner hidden">
@@ -80,8 +100,8 @@
   </div>
 
   <div class="stats">
+    <div class="stat"><div class="lbl">Pot total</div><div class="val" id="s-pot">—</div><div class="split" id="s-split"></div></div>
     <div class="stat"><div class="lbl">Approved bets</div><div class="val" id="s-count">—</div></div>
-    <div class="stat"><div class="lbl">Pot total</div><div class="val" id="s-pot">—</div></div>
     <div class="stat"><div class="lbl">Members</div><div class="val" id="s-mem">—</div></div>
   </div>
 
@@ -127,13 +147,28 @@
 
   <!-- Approved board (everyone) -->
   <div class="card">
-    <h2>The board</h2>
-    <table>
-      <colgroup><col style="width:28%"><col style="width:30%"><col style="width:18%"><col style="width:14%"><col style="width:10%"></colgroup>
-      <thead><tr><th>Member</th><th>Pick</th><th>Category</th><th>Bet</th><th></th></tr></thead>
-      <tbody id="board-body"></tbody>
-    </table>
+    <div class="card-head">
+      <h2>The board</h2>
+      <button class="ghost" onclick="loadAll()">↻ Refresh</button>
+    </div>
+    <div class="note hidden" id="board-admin-hint">Admin mode — use the red <b>Remove</b> button on any row to delete it.</div>
+    <input class="filter" type="text" id="board-filter" placeholder="Filter by member or pick…" oninput="renderBoard()" />
+    <div id="board-sections"></div>
     <div class="empty" id="board-empty">No approved bets yet.</div>
+  </div>
+
+  <!-- Leaderboard (everyone) -->
+  <div class="card">
+    <div class="card-head">
+      <h2>Leaderboard</h2>
+      <span class="sub">by total stake</span>
+    </div>
+    <table>
+      <colgroup><col style="width:14%"><col style="width:46%"><col style="width:18%"><col style="width:22%"></colgroup>
+      <thead><tr><th>#</th><th>Member</th><th>Bets</th><th>Staked</th></tr></thead>
+      <tbody id="lb-body"></tbody>
+    </table>
+    <div class="empty" id="lb-empty">No approved bets yet.</div>
   </div>
 
 </div>
@@ -267,20 +302,70 @@
   }
 
   function renderBoard() {
-    const tb = document.getElementById("board-body");
+    const sections = document.getElementById("board-sections");
     const empty = document.getElementById("board-empty");
-    tb.innerHTML = "";
-    const sorted = [...board].sort((a, b) => a.cat === b.cat ? a.member.localeCompare(b.member) : (a.cat === "winner" ? -1 : 1));
-    empty.style.display = sorted.length ? "none" : "block";
-    for (const b of sorted) {
-      const tr = document.createElement("tr");
-      const action = isAdmin ? '<div class="actions"><button class="del" onclick="delBet(\'' + b.id + '\')">Remove</button></div>' : "";
-      tr.innerHTML = "<td>" + esc(b.member) + "</td><td>" + esc(b.pick) + "</td><td>" + catPill(b.cat) + "</td><td>" + fmt(b.amt) + "</td><td>" + action + "</td>";
-      tb.appendChild(tr);
+    const q = (document.getElementById("board-filter").value || "").trim().toLowerCase();
+    sections.innerHTML = "";
+    document.getElementById("board-admin-hint").classList.toggle("hidden", !(isAdmin && board.length));
+
+    const match = b => !q || b.member.toLowerCase().includes(q) || b.pick.toLowerCase().includes(q);
+    const visible = board.filter(match);
+    empty.style.display = visible.length ? "none" : "block";
+    empty.textContent = board.length === 0 ? "No approved bets yet." : "No bets match your filter.";
+
+    const cats = [["winner", "Team to win"], ["scorer", "Top scorer"]];
+    for (const [c, label] of cats) {
+      const rows = visible.filter(b => b.cat === c).sort((a, b) => (b.amt || 0) - (a.amt || 0) || a.member.localeCompare(b.member));
+      if (!rows.length) continue;
+      const subtotal = rows.reduce((s, b) => s + (b.amt || 0), 0);
+      const sec = document.createElement("div");
+      sec.className = "board-section";
+      const body = rows.map(b => {
+        const action = isAdmin ? '<div class="actions"><button class="del" onclick="delBet(\'' + b.id + '\')">Remove</button></div>' : "";
+        return "<tr><td>" + esc(b.member) + "</td><td>" + esc(b.pick) + "</td><td>" + fmt(b.amt) + "</td><td>" + action + "</td></tr>";
+      }).join("");
+      sec.innerHTML =
+        '<div class="section-head">' + catPill(c) +
+        '<span class="section-sub">' + rows.length + (rows.length === 1 ? " bet" : " bets") + " · " + fmt(subtotal) + "</span></div>" +
+        '<table><colgroup><col style="width:34%"><col style="width:34%"><col style="width:16%"><col style="width:16%"></colgroup>' +
+        "<thead><tr><th>Member</th><th>" + (c === "winner" ? "Team" : "Player") + "</th><th>Bet</th><th></th></tr></thead><tbody>" +
+        body + "</tbody></table>";
+      sections.appendChild(sec);
     }
+
+    const winPot = board.filter(b => b.cat === "winner").reduce((s, b) => s + (b.amt || 0), 0);
+    const scorePot = board.filter(b => b.cat === "scorer").reduce((s, b) => s + (b.amt || 0), 0);
     document.getElementById("s-count").textContent = board.length;
-    document.getElementById("s-pot").textContent = fmt(board.reduce((s, b) => s + (b.amt || 0), 0));
+    document.getElementById("s-pot").textContent = fmt(winPot + scorePot);
+    document.getElementById("s-split").textContent = board.length ? "Winner " + fmt(winPot) + " · Scorer " + fmt(scorePot) : "";
     document.getElementById("s-mem").textContent = new Set(board.map(b => b.member.toLowerCase())).size;
+
+    renderLeaderboard();
+  }
+
+  function renderLeaderboard() {
+    const tb = document.getElementById("lb-body");
+    const empty = document.getElementById("lb-empty");
+    tb.innerHTML = "";
+    const totals = {};
+    for (const b of board) {
+      const key = b.member.toLowerCase();
+      if (!totals[key]) totals[key] = { name: b.member, amt: 0, count: 0 };
+      totals[key].amt += (b.amt || 0);
+      totals[key].count += 1;
+    }
+    const ranked = Object.values(totals).sort((a, b) => b.amt - a.amt || b.count - a.count);
+    empty.style.display = ranked.length ? "none" : "block";
+    const max = ranked.length ? ranked[0].amt : 0;
+    ranked.forEach((m, i) => {
+      const pct = max ? Math.max(4, Math.round((m.amt / max) * 100)) : 0;
+      const tr = document.createElement("tr");
+      tr.innerHTML =
+        '<td class="rank' + (i === 0 ? " top" : "") + '">' + (i + 1) + "</td>" +
+        '<td class="lb-name"><span class="lb-bar" style="width:' + pct + '%"></span><span>' + esc(m.name) + "</span></td>" +
+        "<td>" + m.count + "</td><td>" + fmt(m.amt) + "</td>";
+      tb.appendChild(tr);
+    });
   }
 
   function renderPending() {
