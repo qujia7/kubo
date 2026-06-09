@@ -5,6 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>KUBO — KIPAC Underground Betting Organization</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+  window.MathJax = {
+    tex: { inlineMath: [["\\(", "\\)"]], displayMath: [["\\[", "\\]"]] },
+    svg: { fontCache: "global" }
+  };
+</script>
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
 <style>
   :root {
     --bg: #0f1115; --surface: #181b22; --surface2: #1f232c;
@@ -64,11 +71,22 @@
   .ok { color: var(--green); font-size: 13px; min-height: 18px; margin-top: 6px; }
   .note { font-size: 12px; color: var(--hint); margin-top: 8px; }
   .admin-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  .conflict { color: var(--danger); font-size: 11px; }
   .hidden { display: none !important; }
   .actions { display: flex; gap: 6px; }
   .actions button { height: 30px; padding: 0 10px; font-size: 13px; }
   .banner { background: var(--danger-bg); border: 1px solid var(--danger); color: var(--danger); border-radius: 10px; padding: 0.8rem 1rem; font-size: 13px; margin: 1rem 0; }
+  .tabs { display: flex; gap: 6px; margin: 1.25rem 0 0; }
+  .tabs button { flex: none; padding: 8px 20px; }
+  .tabs button.active { background: var(--info-bg); border-color: var(--info); color: var(--info); }
+  .rules h3 { font-size: 14px; font-weight: 600; margin: 1.3rem 0 0.4rem; }
+  .rules h3:first-child { margin-top: 0; }
+  .rules p { margin: 0.55rem 0; }
+  .rules ul { margin: 0.4rem 0; padding-left: 1.2rem; }
+  .rules li { margin: 0.3rem 0; }
+  .rules .lead { color: var(--muted); font-size: 13px; margin-top: 0; }
+  .rules .flag { color: var(--amber); }
+  .rules .ex { background: var(--surface2); border-radius: 8px; padding: 0.6rem 0.9rem; font-size: 13px; }
+  .rules mjx-container { overflow-x: auto; overflow-y: hidden; }
   .card-head { display: flex; align-items: center; gap: 8px; margin: 0 0 0.75rem; }
   .card-head h2 { margin: 0; flex: 1; }
   .card-head .ghost { height: 30px; padding: 0 10px; font-size: 13px; }
@@ -95,10 +113,16 @@
     </div>
   </div>
 
+  <div class="tabs">
+    <button id="nav-pool" class="active" onclick="showTab('pool')">Pool</button>
+    <button id="nav-rules" onclick="showTab('rules')">Rules</button>
+  </div>
+
   <div id="config-banner" class="banner hidden">
     Supabase is not configured yet. Open this file and fill in <code>SUPABASE_URL</code> and <code>SUPABASE_ANON_KEY</code> near the top of the script.
   </div>
 
+  <div id="tab-pool">
   <div class="stats">
     <div class="stat"><div class="lbl">Pot total</div><div class="val" id="s-pot">—</div><div class="split" id="s-split"></div></div>
     <div class="stat"><div class="lbl">Approved bets</div><div class="val" id="s-count">—</div></div>
@@ -120,7 +144,7 @@
     </div>
     <div class="err" id="submit-err"></div>
     <div class="ok" id="submit-ok"></div>
-    <div class="note">Submissions go to the admin for approval before appearing on the board. No duplicate picks allowed within a category.</div>
+    <div class="note">Submissions go to the admin for approval before appearing on the board. Back any team or player for any amount — several people may back the same pick, and if it wins they split that pot by stake. See the Rules tab.</div>
   </div>
 
   <!-- Admin login / pending queue -->
@@ -170,6 +194,53 @@
     </table>
     <div class="empty" id="lb-empty">No approved bets yet.</div>
   </div>
+  </div><!-- /tab-pool -->
+
+  <!-- Rules tab -->
+  <div id="tab-rules" class="hidden">
+    <div class="card rules">
+      <p class="lead">Settlement rules for the KUBO World Cup pool, stated formally. Each market (Team&nbsp;to&nbsp;win, Top&nbsp;scorer) is settled independently using its own pot.</p>
+
+      <h3>1 · Entries</h3>
+      <p>Within a market, the entries are a finite list
+      \[ e_i = (m_i,\; p_i,\; b_i), \qquad i = 1,\dots,n, \]
+      where \(m_i\) is the member, \(p_i\) the pick (a team, or a player), and \(b_i \in \mathbb{R}_{>0}\) the stake in dollars. Stakes are unrestricted: any positive amount is admissible, and the same pick may be backed by several members.</p>
+
+      <h3>2 · The pot</h3>
+      <p>All stakes in the market are pooled with no rake taken by the house:
+      \[ P \;=\; \sum_{i=1}^{n} b_i. \]</p>
+
+      <h3>3 · Settlement</h3>
+      <p>Let \(\omega\) be the realised outcome (the team that wins, resp. the actual top scorer), and let
+      \[ W \;=\; \{\, i : p_i = \omega \,\}, \qquad S_W \;=\; \sum_{j \in W} b_j \]
+      be the set of winning entries and their combined stake. Each entry is paid
+      \[ \pi_i \;=\; \begin{cases} \displaystyle P \cdot \frac{b_i}{S_W}, & i \in W, \\[1.2em] 0, & i \notin W. \end{cases} \]
+      Equivalently: the winners split the entire pot in proportion to their stakes. A lone correct backer (\(|W| = 1\)) has \(b_i / S_W = 1\) and so takes the whole pot.</p>
+      <p>If no entry is correct \((W = \varnothing)\), the market is <b>void</b> and every stake is refunded:
+      \[ \pi_i = b_i \quad\text{for all } i. \]</p>
+
+      <h3>4 · Conservation</h3>
+      <p><b>Proposition.</b> In either branch the pot is distributed exactly. When \(W \neq \varnothing\),
+      \[ \sum_{i \in W} \pi_i \;=\; \frac{P}{S_W}\sum_{i \in W} b_i \;=\; \frac{P}{S_W}\, S_W \;=\; P, \]
+      and when \(W = \varnothing\), \(\sum_i \pi_i = \sum_i b_i = P\) by refund. The house takes no rake. The net return to a winner is
+      \[ \pi_i - b_i \;=\; b_i\!\left(\frac{P}{S_W} - 1\right), \]
+      which is positive precisely when \(P > S_W\), i.e. whenever some stake was placed on a losing pick.</p>
+
+      <h3>5 · Worked example</h3>
+      <div class="ex">
+        <p style="margin-top:0">Brazil is backed by Alice (\(\$30\)) and Bob (\(\$10\)); a further \(\$60\) is spread across other teams. Then \(P = \$100\). Brazil wins, so \(W = \{\text{Alice}, \text{Bob}\}\) and \(S_W = \$40\):</p>
+        \[ \pi_{\text{Alice}} = 100\cdot\tfrac{30}{40} = \$75, \qquad \pi_{\text{Bob}} = 100\cdot\tfrac{10}{40} = \$25. \]
+        <p style="margin-bottom:0">Net: Alice \(+\$45\), Bob \(+\$15\); total paid \(=\$100=P\).</p>
+      </div>
+
+      <h3>6 · Conventions</h3>
+      <ul>
+        <li><b>Two markets, two pots.</b> Team-to-win and Top-scorer are settled independently, each with its own pot \(P\). Rules 1–5 apply within a single market.</li>
+        <li><b>Free entry.</b> Each member may back any pick for any positive stake. Distinct members may back the same pick; if it wins, they share that pot by stake (rule 3).</li>
+        <li><b>Void market.</b> If no entry in a market is correct, that market is void and all of its stakes are refunded (rule 3, final clause). The other market is unaffected.</li>
+      </ul>
+    </div>
+  </div>
 
 </div>
 
@@ -197,6 +268,14 @@
   } else {
     sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     loadAll();
+  }
+
+  function showTab(name) {
+    document.getElementById("tab-pool").classList.toggle("hidden", name !== "pool");
+    document.getElementById("tab-rules").classList.toggle("hidden", name !== "rules");
+    document.getElementById("nav-pool").classList.toggle("active", name === "pool");
+    document.getElementById("nav-rules").classList.toggle("active", name === "rules");
+    if (name === "rules" && window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise();
   }
 
   function setCat(c) {
@@ -245,8 +324,6 @@
       err.textContent = "Enter your name, a pick, and a valid bet amount.";
       return;
     }
-    const taken = board.some(b => b.cat === cat && b.pick.toLowerCase() === pick.toLowerCase());
-    if (taken) { err.textContent = '"' + pick + '" is already on the board in this category.'; return; }
     const { error } = await sb.from("pending").insert({ member, pick, cat, amt });
     if (error) { err.textContent = "Could not submit. Try again."; console.error(error); return; }
     document.getElementById("i-member").value = "";
@@ -282,8 +359,6 @@
   async function approve(id) {
     const item = pending.find(p => p.id === id);
     if (!item) return;
-    const taken = board.some(b => b.cat === item.cat && b.pick.toLowerCase() === item.pick.toLowerCase());
-    if (taken) { alert('"' + item.pick + '" is already on the board in this category. Reject this one or remove the existing entry first.'); return; }
     const ins = await sb.from("bets").insert({ member: item.member, pick: item.pick, cat: item.cat, amt: item.amt });
     if (ins.error) { console.error(ins.error); return; }
     await sb.from("pending").delete().eq("id", id);
@@ -378,8 +453,7 @@
     tb.innerHTML = "";
     empty.style.display = pending.length ? "none" : "block";
     for (const p of pending) {
-      const conflict = board.some(b => b.cat === p.cat && b.pick.toLowerCase() === p.pick.toLowerCase());
-      const pickCell = esc(p.pick) + (conflict ? '<div class="conflict">already taken</div>' : "");
+      const pickCell = esc(p.pick);
       const tr = document.createElement("tr");
       tr.innerHTML = "<td>" + esc(p.member) + "</td><td>" + pickCell + "</td><td>" + catPill(p.cat) + "</td><td>" + fmt(p.amt) +
         '</td><td><div class="actions"><button class="approve" onclick="approve(\'' + p.id + '\')">Approve</button>' +
