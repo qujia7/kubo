@@ -105,6 +105,7 @@
   .lb-name { position: relative; }
   .lb-bar { position: absolute; left: -8px; top: 0; bottom: 0; background: var(--info-bg); border-radius: 4px; z-index: 0; }
   .lb-name span { position: relative; z-index: 1; }
+  .lb-win { color: var(--green); font-variant-numeric: tabular-nums; }
   .rank { color: var(--hint); font-variant-numeric: tabular-nums; }
   .rank.top { color: var(--amber); font-weight: 700; }
 </style>
@@ -197,10 +198,11 @@
       <span class="sub">by total stake</span>
     </div>
     <table>
-      <colgroup><col style="width:14%"><col style="width:46%"><col style="width:18%"><col style="width:22%"></colgroup>
-      <thead><tr><th>#</th><th>Member</th><th>Bets</th><th>Staked</th></tr></thead>
+      <colgroup><col style="width:9%"><col style="width:37%"><col style="width:13%"><col style="width:20%"><col style="width:21%"></colgroup>
+      <thead><tr><th>#</th><th>Member</th><th>Bets</th><th>Staked</th><th title="What this member collects if every one of their picks wins, at the current pot.">If wins</th></tr></thead>
       <tbody id="lb-body"></tbody>
     </table>
+    <div class="note">“If wins” = total payout at the current pot if all of a member’s picks come through. It shifts as new bets are approved.</div>
     <div class="empty" id="lb-empty">No approved bets yet.</div>
   </div>
   </div><!-- /tab-pool -->
@@ -346,6 +348,49 @@
       : '<span class="pill score">Top scorer</span>';
   }
 
+  // --- Country flags (for team picks) ---
+  function isoToFlag(cc) {
+    return cc.toUpperCase().replace(/./g, c => String.fromCodePoint(127397 + c.charCodeAt(0)));
+  }
+  function tagFlag(code) {
+    let s = String.fromCodePoint(0x1F3F4);
+    for (const ch of code) s += String.fromCodePoint(0xE0000 + ch.charCodeAt(0));
+    return s + String.fromCodePoint(0xE007F);
+  }
+  const SPECIAL_FLAG = { england: tagFlag("gbeng"), scotland: tagFlag("gbsct"), wales: tagFlag("gbwls") };
+  const COUNTRY_CODE = {
+    afghanistan: "af", albania: "al", algeria: "dz", angola: "ao", argentina: "ar", armenia: "am",
+    australia: "au", austria: "at", azerbaijan: "az", bahrain: "bh", belarus: "by", belgium: "be",
+    benin: "bj", bolivia: "bo", bosnia: "ba", botswana: "bw", brazil: "br", bulgaria: "bg",
+    "burkina faso": "bf", cameroon: "cm", canada: "ca", "cape verde": "cv", "cabo verde": "cv",
+    chile: "cl", china: "cn", colombia: "co", comoros: "km", congo: "cg", "dr congo": "cd",
+    "costa rica": "cr", "cote d'ivoire": "ci", "ivory coast": "ci", croatia: "hr", curacao: "cw",
+    czechia: "cz", "czech republic": "cz", denmark: "dk", ecuador: "ec", egypt: "eg",
+    "el salvador": "sv", "equatorial guinea": "gq", ethiopia: "et", finland: "fi", france: "fr",
+    gabon: "ga", gambia: "gm", georgia: "ge", germany: "de", ghana: "gh", greece: "gr",
+    guinea: "gn", honduras: "hn", hungary: "hu", iceland: "is", india: "in", indonesia: "id",
+    iran: "ir", iraq: "iq", ireland: "ie", israel: "il", italy: "it",
+    jamaica: "jm", japan: "jp", jordan: "jo", kazakhstan: "kz", kenya: "ke", kosovo: "xk",
+    kuwait: "kw", lebanon: "lb", libya: "ly", luxembourg: "lu", madagascar: "mg", malaysia: "my",
+    mali: "ml", mauritania: "mr", mexico: "mx", montenegro: "me", morocco: "ma", mozambique: "mz",
+    namibia: "na", netherlands: "nl", holland: "nl", "new zealand": "nz", nigeria: "ng", niger: "ne",
+    "north korea": "kp", "north macedonia": "mk", norway: "no", oman: "om", palestine: "ps",
+    panama: "pa", paraguay: "py", peru: "pe", philippines: "ph", poland: "pl", portugal: "pt",
+    qatar: "qa", romania: "ro", russia: "ru", "saudi arabia": "sa", senegal: "sn", serbia: "rs",
+    "sierra leone": "sl", slovakia: "sk", slovenia: "si", "south africa": "za", "south korea": "kr",
+    korea: "kr", "korea republic": "kr", spain: "es", sudan: "sd", sweden: "se", switzerland: "ch",
+    syria: "sy", tanzania: "tz", thailand: "th", togo: "tg", tunisia: "tn", turkey: "tr",
+    "türkiye": "tr", turkiye: "tr", uae: "ae", "united arab emirates": "ae", uganda: "ug",
+    ukraine: "ua", uruguay: "uy", usa: "us", "united states": "us", america: "us",
+    uzbekistan: "uz", venezuela: "ve", vietnam: "vn", zambia: "zm", zimbabwe: "zw"
+  };
+  function flagFor(name) {
+    const k = (name || "").trim().toLowerCase().replace(/\s+/g, " ");
+    if (SPECIAL_FLAG[k]) return SPECIAL_FLAG[k];
+    const cc = COUNTRY_CODE[k];
+    return cc ? isoToFlag(cc) : "";
+  }
+
   async function loadAll() {
     await Promise.all([loadBoard(), loadPending()]);
   }
@@ -454,7 +499,9 @@
       sec.className = "board-section";
       const body = rows.map(b => {
         const action = isAdmin ? '<div class="actions"><button class="del" onclick="delBet(\'' + b.id + '\')">Remove</button></div>' : "";
-        return "<tr><td>" + esc(b.member) + "</td><td>" + esc(b.pick) + "</td><td>" + fmt(b.amt) + "</td><td>" + action + "</td></tr>";
+        const flag = c === "winner" ? flagFor(b.pick) : "";
+        const pickCell = (flag ? flag + " " : "") + esc(b.pick);
+        return "<tr><td>" + esc(b.member) + "</td><td>" + pickCell + "</td><td>" + fmt(b.amt) + "</td><td>" + action + "</td></tr>";
       }).join("");
       sec.innerHTML =
         '<div class="section-head">' + catPill(c) +
@@ -479,12 +526,22 @@
     const tb = document.getElementById("lb-body");
     const empty = document.getElementById("lb-empty");
     tb.innerHTML = "";
+    // Pot per category, and combined stake on each (category, pick) so duplicate backers share.
+    const potByCat = {}, stakeByPick = {};
+    for (const b of board) {
+      potByCat[b.cat] = (potByCat[b.cat] || 0) + (b.amt || 0);
+      const pk = b.cat + "|" + b.pick.toLowerCase();
+      stakeByPick[pk] = (stakeByPick[pk] || 0) + (b.amt || 0);
+    }
     const totals = {};
     for (const b of board) {
       const key = b.member.toLowerCase();
-      if (!totals[key]) totals[key] = { name: b.member, amt: 0, count: 0 };
+      if (!totals[key]) totals[key] = { name: b.member, amt: 0, count: 0, payout: 0 };
       totals[key].amt += (b.amt || 0);
       totals[key].count += 1;
+      const pk = b.cat + "|" + b.pick.toLowerCase();
+      const share = stakeByPick[pk] ? (b.amt || 0) / stakeByPick[pk] : 0;
+      totals[key].payout += (potByCat[b.cat] || 0) * share;
     }
     const ranked = Object.values(totals).sort((a, b) => b.amt - a.amt || b.count - a.count);
     empty.style.display = ranked.length ? "none" : "block";
@@ -495,7 +552,7 @@
       tr.innerHTML =
         '<td class="rank' + (i === 0 ? " top" : "") + '">' + (i + 1) + "</td>" +
         '<td class="lb-name"><span class="lb-bar" style="width:' + pct + '%"></span><span>' + esc(m.name) + "</span></td>" +
-        "<td>" + m.count + "</td><td>" + fmt(m.amt) + "</td>";
+        "<td>" + m.count + "</td><td>" + fmt(m.amt) + '</td><td class="lb-win">' + fmt(m.payout) + "</td>";
       tb.appendChild(tr);
     });
   }
@@ -510,7 +567,8 @@
     tb.innerHTML = "";
     empty.style.display = pending.length ? "none" : "block";
     for (const p of pending) {
-      const pickCell = esc(p.pick);
+      const flag = p.cat === "winner" ? flagFor(p.pick) : "";
+      const pickCell = (flag ? flag + " " : "") + esc(p.pick);
       const tr = document.createElement("tr");
       tr.innerHTML = "<td>" + esc(p.member) + "</td><td>" + pickCell + "</td><td>" + catPill(p.cat) + "</td><td>" + fmt(p.amt) +
         '</td><td><div class="actions"><button class="approve" onclick="approve(\'' + p.id + '\')">Approve</button>' +
