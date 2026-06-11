@@ -106,6 +106,9 @@
   .lb-bar { position: absolute; left: -8px; top: 0; bottom: 0; background: var(--info-bg); border-radius: 4px; z-index: 0; }
   .lb-name span { position: relative; z-index: 1; }
   .lb-win { color: var(--green); font-variant-numeric: tabular-nums; }
+  .lb-win-list { display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+  .lb-win-list > div { display: flex; justify-content: space-between; gap: 10px; }
+  .lb-win-list .lb-pick { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .rank { color: var(--hint); font-variant-numeric: tabular-nums; }
   .rank.top { color: var(--amber); font-weight: 700; }
 </style>
@@ -199,10 +202,10 @@
     </div>
     <table>
       <colgroup><col style="width:9%"><col style="width:37%"><col style="width:13%"><col style="width:20%"><col style="width:21%"></colgroup>
-      <thead><tr><th>#</th><th>Member</th><th>Bets</th><th>Staked</th><th title="What this member collects if every one of their picks wins, at the current pot.">If wins</th></tr></thead>
+      <thead><tr><th>#</th><th>Member</th><th>Bets</th><th>Staked</th><th title="What this member collects if a given pick wins, at the current pot.">If wins</th></tr></thead>
       <tbody id="lb-body"></tbody>
     </table>
-    <div class="note">“If wins” = total payout at the current pot if all of a member’s picks come through. It shifts as new bets are approved.</div>
+    <div class="note">“If wins” = what you’d collect at the current pot if that pick wins. With several entries each is listed separately — picks in the same market are mutually exclusive (only one team and one top scorer can win), so they don’t add up. Figures shift as new bets are approved.</div>
     <div class="empty" id="lb-empty">No approved bets yet.</div>
   </div>
   </div><!-- /tab-pool -->
@@ -536,23 +539,35 @@
     const totals = {};
     for (const b of board) {
       const key = b.member.toLowerCase();
-      if (!totals[key]) totals[key] = { name: b.member, amt: 0, count: 0, payout: 0 };
+      if (!totals[key]) totals[key] = { name: b.member, amt: 0, count: 0, entries: [] };
       totals[key].amt += (b.amt || 0);
       totals[key].count += 1;
       const pk = b.cat + "|" + b.pick.toLowerCase();
       const share = stakeByPick[pk] ? (b.amt || 0) / stakeByPick[pk] : 0;
-      totals[key].payout += (potByCat[b.cat] || 0) * share;
+      totals[key].entries.push({ cat: b.cat, pick: b.pick, payout: (potByCat[b.cat] || 0) * share });
     }
     const ranked = Object.values(totals).sort((a, b) => b.amt - a.amt || b.count - a.count);
     empty.style.display = ranked.length ? "none" : "block";
     const max = ranked.length ? ranked[0].amt : 0;
     ranked.forEach((m, i) => {
       const pct = max ? Math.max(4, Math.round((m.amt / max) * 100)) : 0;
+      let winCell;
+      if (m.entries.length <= 1) {
+        winCell = '<span class="lb-win">' + fmt(m.entries.length ? m.entries[0].payout : 0) + "</span>";
+      } else {
+        // Sort largest first; show one line per pick since only one per market can win.
+        const lines = m.entries.slice().sort((a, b) => b.payout - a.payout).map(e => {
+          const flag = e.cat === "winner" ? flagFor(e.pick) : "";
+          return '<div><span class="lb-pick">' + (flag ? flag + " " : "") + esc(e.pick) +
+            '</span><span class="lb-win">' + fmt(e.payout) + "</span></div>";
+        }).join("");
+        winCell = '<div class="lb-win-list">' + lines + "</div>";
+      }
       const tr = document.createElement("tr");
       tr.innerHTML =
         '<td class="rank' + (i === 0 ? " top" : "") + '">' + (i + 1) + "</td>" +
         '<td class="lb-name"><span class="lb-bar" style="width:' + pct + '%"></span><span>' + esc(m.name) + "</span></td>" +
-        "<td>" + m.count + "</td><td>" + fmt(m.amt) + '</td><td class="lb-win">' + fmt(m.payout) + "</td>";
+        "<td>" + m.count + "</td><td>" + fmt(m.amt) + "</td><td>" + winCell + "</td>";
       tb.appendChild(tr);
     });
   }
