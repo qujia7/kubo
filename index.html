@@ -113,7 +113,6 @@
   .lb-win-list .elim .lb-pick { color: var(--hint); }
   .pill.out { background: var(--danger-bg); color: var(--danger); }
   tr.eliminated td { opacity: 0.55; }
-  button.ko { background: var(--amber-bg); border-color: var(--amber); color: var(--amber); }
   .rank { color: var(--hint); font-variant-numeric: tabular-nums; }
   .rank.top { color: var(--amber); font-weight: 700; }
 </style>
@@ -281,13 +280,16 @@
 
   // Minimum stake, in dollars.
   const MIN_BET = 10;
+
+  // Knocked-out picks (case-insensitive). Add team/player names here as they
+  // get eliminated — they show struck-through and red on the board & leaderboard.
+  const ELIMINATED = ["Japan"];
   // ====================================================================
 
   let cat = "winner";
   let isAdmin = false;
   let board = [];
   let pending = [];
-  let eliminated = [];
   let sb = null;
 
   const configured = SUPABASE_URL.startsWith("http") && SUPABASE_ANON_KEY.length > 20;
@@ -305,7 +307,6 @@
       sb.channel("kubo-live")
         .on("postgres_changes", { event: "*", schema: "public", table: "bets" }, loadBoard)
         .on("postgres_changes", { event: "*", schema: "public", table: "pending" }, loadPending)
-        .on("postgres_changes", { event: "*", schema: "public", table: "eliminated" }, loadEliminated)
         .subscribe();
     } catch (e) { console.error("realtime unavailable", e); }
   }
@@ -413,7 +414,7 @@
   }
 
   async function loadAll() {
-    await Promise.all([loadBoard(), loadPending(), loadEliminated()]);
+    await Promise.all([loadBoard(), loadPending()]);
   }
 
   async function loadBoard() {
@@ -430,31 +431,9 @@
     renderPending();
   }
 
-  async function loadEliminated() {
-    const { data, error } = await sb.from("eliminated").select("*");
-    if (error) { console.error(error); return; }  // table not created yet -> no eliminations
-    eliminated = data || [];
-    renderBoard();
-  }
-
-  function elimKey(cat, pick) { return cat + "|" + (pick || "").trim().toLowerCase(); }
   function isElim(cat, pick) {
-    const k = elimKey(cat, pick);
-    return eliminated.some(e => elimKey(e.cat, e.pick) === k);
-  }
-
-  // Admin: toggle a pick's knocked-out state (affects every bet on that pick).
-  async function toggleElimById(id) {
-    const b = board.find(x => x.id === id);
-    if (!b) return;
-    if (isElim(b.cat, b.pick)) {
-      const k = elimKey(b.cat, b.pick);
-      const ids = eliminated.filter(e => elimKey(e.cat, e.pick) === k).map(e => e.id);
-      if (ids.length) await sb.from("eliminated").delete().in("id", ids);
-    } else {
-      await sb.from("eliminated").insert({ cat: b.cat, pick: b.pick });
-    }
-    await loadEliminated();
+    const k = (pick || "").trim().toLowerCase();
+    return ELIMINATED.some(e => e.trim().toLowerCase() === k);
   }
 
   async function submitBet() {
@@ -550,20 +529,13 @@
         const flag = c === "winner" ? flagFor(b.pick) : "";
         const inner = (flag ? flag + " " : "") + esc(b.pick);
         const pickCell = out ? "<s>" + inner + '</s> <span class="pill out">out</span>' : inner;
-        let action = "";
-        if (isAdmin) {
-          action = '<div class="actions"><button class="ko" onclick="toggleElimById(\'' + b.id + '\')">' +
-            (out ? "Revive" : "Knock out") + '</button><button class="del" onclick="delBet(\'' + b.id + '\')">Remove</button></div>';
-        }
+        const action = isAdmin ? '<div class="actions"><button class="del" onclick="delBet(\'' + b.id + '\')">Remove</button></div>' : "";
         return '<tr class="' + (out ? "eliminated" : "") + '"><td>' + esc(b.member) + "</td><td>" + pickCell + "</td><td>" + fmt(b.amt) + "</td><td>" + action + "</td></tr>";
       }).join("");
-      const cols = isAdmin
-        ? '<col style="width:24%"><col style="width:30%"><col style="width:12%"><col style="width:34%">'
-        : '<col style="width:34%"><col style="width:34%"><col style="width:16%"><col style="width:16%">';
       sec.innerHTML =
         '<div class="section-head">' + catPill(c) +
         '<span class="section-sub">' + rows.length + (rows.length === 1 ? " bet" : " bets") + " · " + fmt(subtotal) + "</span></div>" +
-        "<table><colgroup>" + cols + "</colgroup>" +
+        '<table><colgroup><col style="width:34%"><col style="width:34%"><col style="width:16%"><col style="width:16%"></colgroup>' +
         "<thead><tr><th>Member</th><th>" + (c === "winner" ? "Team" : "Player") + "</th><th>Bet</th><th></th></tr></thead><tbody>" +
         body + "</tbody></table>";
       sections.appendChild(sec);
