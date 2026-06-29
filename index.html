@@ -79,7 +79,7 @@
   #deadline-note { margin: 0 0 12px; font-size: 13px; color: var(--muted); }
   .admin-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .hidden { display: none !important; }
-  .actions { display: flex; gap: 6px; }
+  .actions { display: flex; gap: 6px; flex-wrap: wrap; }
   .actions button { height: 30px; padding: 0 10px; font-size: 13px; }
   .banner { background: var(--danger-bg); border: 1px solid var(--danger); color: var(--danger); border-radius: 10px; padding: 0.8rem 1rem; font-size: 13px; margin: 1rem 0; }
   .tabs { display: flex; gap: 6px; margin: 1.25rem 0 0; }
@@ -106,9 +106,14 @@
   .lb-bar { position: absolute; left: -8px; top: 0; bottom: 0; background: var(--info-bg); border-radius: 4px; z-index: 0; }
   .lb-name span { position: relative; z-index: 1; }
   .lb-win { color: var(--green); font-variant-numeric: tabular-nums; }
+  .lb-loss { color: var(--danger); font-variant-numeric: tabular-nums; }
   .lb-win-list { display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
   .lb-win-list > div { display: flex; justify-content: space-between; gap: 10px; }
   .lb-win-list .lb-pick { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lb-win-list .elim .lb-pick { color: var(--hint); }
+  .pill.out { background: var(--danger-bg); color: var(--danger); }
+  tr.eliminated td { opacity: 0.55; }
+  button.ko { background: var(--amber-bg); border-color: var(--amber); color: var(--amber); }
   .rank { color: var(--hint); font-variant-numeric: tabular-nums; }
   .rank.top { color: var(--amber); font-weight: 700; }
 </style>
@@ -205,7 +210,7 @@
       <thead><tr><th>#</th><th>Member</th><th>Bets</th><th>Staked</th><th title="What this member collects if a given pick wins, at the current pot.">If wins</th></tr></thead>
       <tbody id="lb-body"></tbody>
     </table>
-    <div class="note">“If wins” = what you’d collect at the current pot if that pick wins. With several entries each is listed separately — picks in the same market are mutually exclusive (only one team and one top scorer can win), so they don’t add up. Figures shift as new bets are approved.</div>
+    <div class="note">“If wins” = what you’d collect at the current pot if that pick wins (green). Picks in the same market are mutually exclusive, so multiple entries are listed separately rather than summed. A knocked-out pick can no longer win, so it shows as a locked loss of its stake (red). The pot itself doesn’t shrink — a loser’s stake goes to the eventual winner. Figures update live.</div>
     <div class="empty" id="lb-empty">No approved bets yet.</div>
   </div>
   </div><!-- /tab-pool -->
@@ -282,6 +287,7 @@
   let isAdmin = false;
   let board = [];
   let pending = [];
+  let eliminated = [];
   let sb = null;
 
   const configured = SUPABASE_URL.startsWith("http") && SUPABASE_ANON_KEY.length > 20;
@@ -290,6 +296,18 @@
   } else {
     sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     loadAll();
+    subscribeLive();
+  }
+
+  // Live updates: re-pull the relevant table whenever it changes anywhere.
+  function subscribeLive() {
+    try {
+      sb.channel("kubo-live")
+        .on("postgres_changes", { event: "*", schema: "public", table: "bets" }, loadBoard)
+        .on("postgres_changes", { event: "*", schema: "public", table: "pending" }, loadPending)
+        .on("postgres_changes", { event: "*", schema: "public", table: "eliminated" }, loadEliminated)
+        .subscribe();
+    } catch (e) { console.error("realtime unavailable", e); }
   }
 
   function submissionsClosed() { return new Date() > SUBMIT_DEADLINE; }
@@ -395,7 +413,7 @@
   }
 
   async function loadAll() {
-    await Promise.all([loadBoard(), loadPending()]);
+    await Promise.all([loadBoard(), loadPending(), loadEliminated()]);
   }
 
   async function loadBoard() {
@@ -410,6 +428,33 @@
     if (error) { console.error(error); return; }
     pending = data || [];
     renderPending();
+  }
+
+  async function loadEliminated() {
+    const { data, error } = await sb.from("eliminated").select("*");
+    if (error) { console.error(error); return; }  // table not created yet -> no eliminations
+    eliminated = data || [];
+    renderBoard();
+  }
+
+  function elimKey(cat, pick) { return cat + "|" + (pick || "").trim().toLowerCase(); }
+  function isElim(cat, pick) {
+    const k = elimKey(cat, pick);
+    return eliminated.some(e => elimKey(e.cat, e.pick) === k);
+  }
+
+  // Admin: toggle a pick's knocked-out state (affects every bet on that pick).
+  async function toggleElimById(id) {
+    const b = board.find(x => x.id === id);
+    if (!b) return;
+    if (isElim(b.cat, b.pick)) {
+      const k = elimKey(b.cat, b.pick);
+      const ids = eliminated.filter(e => elimKey(e.cat, e.pick) === k).map(e => e.id);
+      if (ids.length) await sb.from("eliminated").delete().in("id", ids);
+    } else {
+      await sb.from("eliminated").insert({ cat: b.cat, pick: b.pick });
+    }
+    await loadEliminated();
   }
 
   async function submitBet() {
@@ -501,15 +546,24 @@
       const sec = document.createElement("div");
       sec.className = "board-section";
       const body = rows.map(b => {
-        const action = isAdmin ? '<div class="actions"><button class="del" onclick="delBet(\'' + b.id + '\')">Remove</button></div>' : "";
+        const out = isElim(b.cat, b.pick);
         const flag = c === "winner" ? flagFor(b.pick) : "";
-        const pickCell = (flag ? flag + " " : "") + esc(b.pick);
-        return "<tr><td>" + esc(b.member) + "</td><td>" + pickCell + "</td><td>" + fmt(b.amt) + "</td><td>" + action + "</td></tr>";
+        const inner = (flag ? flag + " " : "") + esc(b.pick);
+        const pickCell = out ? "<s>" + inner + '</s> <span class="pill out">out</span>' : inner;
+        let action = "";
+        if (isAdmin) {
+          action = '<div class="actions"><button class="ko" onclick="toggleElimById(\'' + b.id + '\')">' +
+            (out ? "Revive" : "Knock out") + '</button><button class="del" onclick="delBet(\'' + b.id + '\')">Remove</button></div>';
+        }
+        return '<tr class="' + (out ? "eliminated" : "") + '"><td>' + esc(b.member) + "</td><td>" + pickCell + "</td><td>" + fmt(b.amt) + "</td><td>" + action + "</td></tr>";
       }).join("");
+      const cols = isAdmin
+        ? '<col style="width:24%"><col style="width:30%"><col style="width:12%"><col style="width:34%">'
+        : '<col style="width:34%"><col style="width:34%"><col style="width:16%"><col style="width:16%">';
       sec.innerHTML =
         '<div class="section-head">' + catPill(c) +
         '<span class="section-sub">' + rows.length + (rows.length === 1 ? " bet" : " bets") + " · " + fmt(subtotal) + "</span></div>" +
-        '<table><colgroup><col style="width:34%"><col style="width:34%"><col style="width:16%"><col style="width:16%"></colgroup>' +
+        "<table><colgroup>" + cols + "</colgroup>" +
         "<thead><tr><th>Member</th><th>" + (c === "winner" ? "Team" : "Player") + "</th><th>Bet</th><th></th></tr></thead><tbody>" +
         body + "</tbody></table>";
       sections.appendChild(sec);
@@ -544,23 +598,33 @@
       totals[key].count += 1;
       const pk = b.cat + "|" + b.pick.toLowerCase();
       const share = stakeByPick[pk] ? (b.amt || 0) / stakeByPick[pk] : 0;
-      totals[key].entries.push({ cat: b.cat, pick: b.pick, payout: (potByCat[b.cat] || 0) * share });
+      totals[key].entries.push({
+        cat: b.cat, pick: b.pick, stake: (b.amt || 0),
+        payout: (potByCat[b.cat] || 0) * share, out: isElim(b.cat, b.pick)
+      });
     }
     const ranked = Object.values(totals).sort((a, b) => b.amt - a.amt || b.count - a.count);
     empty.style.display = ranked.length ? "none" : "block";
     const max = ranked.length ? ranked[0].amt : 0;
+    // A knocked-out pick can't win: it's a locked loss of that stake.
+    const cellFor = e => e.out
+      ? '<span class="lb-loss">−' + fmt(e.stake) + "</span>"
+      : '<span class="lb-win">' + fmt(e.payout) + "</span>";
     ranked.forEach((m, i) => {
       const pct = max ? Math.max(4, Math.round((m.amt / max) * 100)) : 0;
       let winCell;
       if (m.entries.length <= 1) {
-        winCell = '<span class="lb-win">' + fmt(m.entries.length ? m.entries[0].payout : 0) + "</span>";
+        winCell = m.entries.length ? cellFor(m.entries[0]) : '<span class="lb-win">' + fmt(0) + "</span>";
       } else {
-        // Sort largest first; show one line per pick since only one per market can win.
-        const lines = m.entries.slice().sort((a, b) => b.payout - a.payout).map(e => {
-          const flag = e.cat === "winner" ? flagFor(e.pick) : "";
-          return '<div><span class="lb-pick">' + (flag ? flag + " " : "") + esc(e.pick) +
-            '</span><span class="lb-win">' + fmt(e.payout) + "</span></div>";
-        }).join("");
+        // Live picks first (by payout), knocked-out last; one line each since only one per market can win.
+        const lines = m.entries.slice()
+          .sort((a, b) => (a.out - b.out) || (a.out ? b.stake - a.stake : b.payout - a.payout))
+          .map(e => {
+            const flag = e.cat === "winner" ? flagFor(e.pick) : "";
+            const label = (flag ? flag + " " : "") + esc(e.pick);
+            return '<div' + (e.out ? ' class="elim"' : "") + '><span class="lb-pick">' +
+              (e.out ? "<s>" + label + "</s>" : label) + "</span>" + cellFor(e) + "</div>";
+          }).join("");
         winCell = '<div class="lb-win-list">' + lines + "</div>";
       }
       const tr = document.createElement("tr");
