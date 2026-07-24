@@ -112,7 +112,12 @@
   .lb-win-list .lb-pick { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .lb-win-list .elim .lb-pick { color: var(--hint); }
   .pill.out { background: var(--danger-bg); color: var(--danger); }
+  .pill.won { background: var(--green-bg); color: var(--green); }
   tr.eliminated td { opacity: 0.55; }
+  tr.won td { background: var(--green-bg); }
+  .results table { font-variant-numeric: tabular-nums; }
+  .net-pos { color: var(--green); font-weight: 600; }
+  .net-neg { color: var(--danger); font-weight: 600; }
   .rank { color: var(--hint); font-variant-numeric: tabular-nums; }
   .rank.top { color: var(--amber); font-weight: 700; }
 </style>
@@ -143,6 +148,18 @@
     <div class="stat"><div class="lbl">Pot total</div><div class="val" id="s-pot">—</div><div class="split" id="s-split"></div></div>
     <div class="stat"><div class="lbl">Approved bets</div><div class="val" id="s-count">—</div></div>
     <div class="stat"><div class="lbl">Members</div><div class="val" id="s-mem">—</div></div>
+  </div>
+
+  <!-- Final results (shown when RESULT is set) -->
+  <div class="card results hidden" id="results-card">
+    <div class="card-head"><h2>🏆 Final results</h2></div>
+    <div class="sub" id="results-summary" style="margin-bottom:10px;"></div>
+    <table>
+      <colgroup><col style="width:36%"><col style="width:16%"><col style="width:24%"><col style="width:24%"></colgroup>
+      <thead><tr><th>Member</th><th>Staked</th><th>Collects</th><th>Net</th></tr></thead>
+      <tbody id="results-body"></tbody>
+    </table>
+    <div class="note" id="results-note"></div>
   </div>
 
   <!-- Submit a bet (everyone) -->
@@ -284,6 +301,10 @@
   // Knocked-out picks (case-insensitive). Add team/player names here as they
   // get eliminated — they show struck-through and red on the board & leaderboard.
   const ELIMINATED = ["Japan", "Germany", "Brazil"];
+
+  // Final results. Set the winning pick for each market once the tournament is
+  // over ("" = not settled). When set, the Final Results payout table shows.
+  const RESULT = { winner: "Spain", scorer: "Mbappe" };
   // ====================================================================
 
   let cat = "winner";
@@ -363,6 +384,12 @@
   }
 
   function fmt(n) { return "$" + Math.round(n || 0).toLocaleString(); }
+  function money(n) { return "$" + (Math.round((n || 0) * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function isSettled() { return !!((RESULT.winner || "").trim() || (RESULT.scorer || "").trim()); }
+  function isWinningPick(cat, pick) {
+    const w = (RESULT[cat] || "").trim().toLowerCase();
+    return !!w && (pick || "").trim().toLowerCase() === w;
+  }
   function esc(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
   function catPill(c) {
     return c === "winner"
@@ -525,12 +552,15 @@
       const sec = document.createElement("div");
       sec.className = "board-section";
       const body = rows.map(b => {
-        const out = isElim(b.cat, b.pick);
+        const won = isWinningPick(b.cat, b.pick);
+        const out = !won && isElim(b.cat, b.pick);
         const flag = c === "winner" ? flagFor(b.pick) : "";
         const inner = (flag ? flag + " " : "") + esc(b.pick);
-        const pickCell = out ? "<s>" + inner + '</s> <span class="pill out">out</span>' : inner;
+        const pickCell = won ? inner + ' <span class="pill won">won</span>'
+          : (out ? "<s>" + inner + '</s> <span class="pill out">out</span>' : inner);
         const action = isAdmin ? '<div class="actions"><button class="del" onclick="delBet(\'' + b.id + '\')">Remove</button></div>' : "";
-        return '<tr class="' + (out ? "eliminated" : "") + '"><td>' + esc(b.member) + "</td><td>" + pickCell + "</td><td>" + fmt(b.amt) + "</td><td>" + action + "</td></tr>";
+        const cls = won ? "won" : (out ? "eliminated" : "");
+        return '<tr class="' + cls + '"><td>' + esc(b.member) + "</td><td>" + pickCell + "</td><td>" + fmt(b.amt) + "</td><td>" + action + "</td></tr>";
       }).join("");
       sec.innerHTML =
         '<div class="section-head">' + catPill(c) +
@@ -549,6 +579,62 @@
     document.getElementById("s-mem").textContent = new Set(board.map(b => b.member.toLowerCase())).size;
 
     renderLeaderboard();
+    renderResults();
+  }
+
+  // Final settlement: each market's pot is split among correct backers in
+  // proportion to stake; a market with no correct pick is void (refund).
+  function renderResults() {
+    const card = document.getElementById("results-card");
+    if (!isSettled()) { card.classList.add("hidden"); return; }
+    card.classList.remove("hidden");
+
+    const staked = {}, collect = {};
+    const names = {};
+    for (const b of board) {
+      const key = b.member.toLowerCase();
+      names[key] = b.member;
+      staked[key] = (staked[key] || 0) + (b.amt || 0);
+      if (!(key in collect)) collect[key] = 0;
+    }
+
+    const summary = [];
+    for (const c of ["winner", "scorer"]) {
+      const w = (RESULT[c] || "").trim();
+      if (!w) continue;
+      const rows = board.filter(b => b.cat === c);
+      const pot = rows.reduce((s, b) => s + (b.amt || 0), 0);
+      const winners = rows.filter(b => isWinningPick(c, b.pick));
+      const Sw = winners.reduce((s, b) => s + (b.amt || 0), 0);
+      const label = c === "winner" ? "Team to win" : "Top scorer";
+      if (Sw === 0) {
+        // Void: refund every stake in this market.
+        rows.forEach(b => { collect[b.member.toLowerCase()] += (b.amt || 0); });
+        summary.push(label + ": <b>" + esc(w) + "</b> — no correct pick, pot " + fmt(pot) + " refunded");
+      } else {
+        winners.forEach(b => { collect[b.member.toLowerCase()] += pot * (b.amt || 0) / Sw; });
+        summary.push(label + ": <b>" + esc(w) + "</b> — pot " + fmt(pot) + " to " + winners.length + " winner" + (winners.length === 1 ? "" : "s"));
+      }
+    }
+    document.getElementById("results-summary").innerHTML = summary.join(" &nbsp;·&nbsp; ");
+
+    const people = Object.keys(staked).map(k => ({
+      name: names[k], staked: staked[k], collect: collect[k] || 0, net: (collect[k] || 0) - staked[k]
+    })).sort((a, b) => b.net - a.net || b.collect - a.collect);
+
+    const tb = document.getElementById("results-body");
+    tb.innerHTML = people.map(p => {
+      const netCls = p.net > 0.005 ? "net-pos" : (p.net < -0.005 ? "net-neg" : "");
+      const netStr = (p.net > 0.005 ? "+" : p.net < -0.005 ? "−" : "") + money(Math.abs(p.net));
+      return "<tr><td>" + esc(p.name) + "</td><td>" + money(p.staked) + "</td><td>" +
+        (p.collect > 0.005 ? money(p.collect) : "—") + '</td><td class="' + netCls + '">' + netStr + "</td></tr>";
+    }).join("");
+
+    const totalReceive = people.filter(p => p.net > 0).reduce((s, p) => s + p.net, 0);
+    document.getElementById("results-note").innerHTML =
+      "Honour-system settlement by <b>Net</b>: people in <span class='net-pos'>green receive</span> that amount, " +
+      "people in <span class='net-neg'>red pay</span> it. The two sides balance (" + money(totalReceive) +
+      " each way). Pay via Venmo or Monzo. “Collects” is gross winnings from the pot before your own stake.";
   }
 
   function renderLeaderboard() {
